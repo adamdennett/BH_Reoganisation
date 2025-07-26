@@ -1,0 +1,322 @@
+---
+title: "Brighton and Hove Devolution and Reorganisation - the Sussex and Brighton Combined County Authority"
+format: html
+---
+
+Background:
+
+Here's what the Government says about devolution in our area: https://www.gov.uk/government/consultations/sussex-and-brighton-devolution/sussex-and-brighton-devolution-consultation
+
+Brighton and Hove City Council love a consultation. They love to hear what the city thinks. Whether they like that they hear is another matter altogether. And whether they represent the views of the city fairly when they report back on these consultations is, sadly, not always a given (see here for details - <https://www.whatdotheyknow.com/request/ai_report_v_appendix_12_signific#incoming-3066175>).
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| include: false
+library(tidyverse)
+library(sf)
+library(geojsonio)
+library(geojsonsf)
+library(leaflet)
+library(tmap)
+library(readr)
+library(janitor)
+
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| include: false
+
+# Define the URL for the GeoJSON file
+#geojson_url <- "https://services1.arcgis.com/ESMARspQHYMw9BZ9/arcgis/rest/services/WD_MAY_2025_UK_BFC/FeatureServer/0/query?outFields=*&where=1%3D1&f=geojson"
+
+gpkg_file_path <- "data/WD_MAY_2025_UK_BFC_865555711586926236.gpkg"
+# Read the GeoJSON data into an sf object
+# st_read can directly read from a URL
+uk_bfc_data <- st_read(gpkg_file_path)
+
+Sussex_Local_Authorities = c(
+    "Brighton and Hove","Eastbourne", "Hastings", "Lewes", "Rother", "Wealden", "East Sussex (County)", "Adur", "Arun", "Chichester", "Crawley", "Horsham", "Mid Sussex", "Worthing", "West Sussex (County)" 
+  )
+
+Sussex_ONS_Codes = c(
+    "E06000043", "E07000061", "E07000062", "E07000063", "E07000064", "E07000065", "E10000011",
+    "E07000223", "E07000224", "E07000225", "E07000226", "E07000227", "E07000228", "E07000229", "E10000032"
+  )
+
+# Filter the data to include all specified Sussex Local Authorities
+# We are now using the 'LAD25CD' column as requested.
+sussex_wards_data <- uk_bfc_data %>%
+  filter(LAD25CD %in% Sussex_ONS_Codes)
+
+# You can now work with 'brighton_hove_data' for further analysis or plotting.
+# For example, to plot it:
+# plot(st_geometry(brighton_hove_data))
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+library(tmap)
+
+# Create the interactive map
+# We'll color the polygons randomly or by a variable, and add popups for detail on click.
+# Assuming 'LAD17NM' still contains the human-readable name, and 'LAD25CD' is the code.
+# You can adjust 'col' to color by a specific variable if desired, e.g., col = "LAD17NM"
+tmap_mode("view") # Set tmap to interactive mode
+m <- tm_shape(sussex_wards_data) +
+  tm_polygons(
+    col = "LAD25NM",        # Color by Local Authority Name
+    alpha = 0.4,           # Transparency
+    border.col = "black",  # Border color
+    popup.vars = c(
+      "Local Authority Name" = "LAD25NM", # Display human-readable name on hover/click
+      "ONS Code" = "LAD25CD"             # Display ONS code
+    ),
+    id = "LAD25NM" # Use the name for identification in the popup
+  )  # Add base maps
+
+# Print the map
+m
+
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| include: false
+csv_file_path <- "data/opencouncildata_councillors2025.csv"
+
+councillors_data <- read_csv(csv_file_path)
+
+councillors_data_cleaned <- councillors_data %>%
+  clean_names()
+
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+# Now, perform the pivoting operation
+councillors_wide <- councillors_data_cleaned %>%
+  # Group by the unique identifiers for each row in the output
+  group_by(council, ward_name) %>%
+  # Create an index for each councillor within each ward
+  mutate(councillor_seq = row_number()) %>%
+  ungroup() %>% # Ungroup after creating the sequence
+  # Pivot the data to a wide format
+  pivot_wider(
+    id_cols = c(council, ward_name), # These columns will remain as identifying columns
+    names_from = councillor_seq, # The new columns will be suffixed with this sequence
+    values_from = c(
+      councillor_name,
+      next_election,
+      party_name,
+      electoral_commission_party_code
+    ),
+    names_sep = "_" # This specifies how the new column names are created (e.g., councillor_name_1)
+  )
+
+# Display the first few rows of the new wide format data frame
+# You'll see one row per ward_name, with multiple columns for councillor details
+# Define the list of councils to filter by
+sussex_councils <- c("Eastbourne","Hastings","Lewes","Rother","Wealden","East Sussex","Adur","Arun", "Chichester", "Crawley","Horsham","Mid Sussex", "Worthing", "West Sussex", "Brighton and Hove")
+
+# Create a new subset filtered on these councils
+sussex_councillors_data <- councillors_wide %>%
+  filter(council %in% sussex_councils)
+
+```
+
+```{r}
+#| message: false
+#| warning: false
+#| include: false
+wards_with_cllrs <- sussex_wards_data %>%
+  left_join(sussex_councillors_data,
+            by = c("LAD25NM" = "council", # Match council first
+                   "WD25NM" = "ward_name")) # Then match ward name  # Ensure "LAD25NM" is 
+
+wards_with_cllrs_reprojected <- wards_with_cllrs %>%
+  st_transform(crs = 4326)
+
+#st_write(wards_with_cllrs_reprojected, "sussex_wards_with_councillors.geojson", driver = "GeoJSON", delete_dsn = TRUE)
+
+# Ensure wards_with_cllrs_reprojected is available (run the data preparation steps if not)
+# (Previous code to define wards_with_cllrs_reprojected goes here)
+
+# Combine all party name columns into a single vector
+all_party_names <- c(
+  wards_with_cllrs_reprojected$party_name_1,
+  wards_with_cllrs_reprojected$party_name_2,
+  wards_with_cllrs_reprojected$party_name_3
+)
+
+# Get unique party names, excluding NA values
+unique_party_names <- unique(all_party_names) %>%
+  na.omit() %>% # Remove NA values
+  sort()       # Optional: sort them alphabetically
+
+# Print the list of unique party names
+cat("List of unique party names across all councillor positions:\n")
+print(unique_party_names)
+
+# Optional: Get the number of unique parties
+cat("\nNumber of unique parties found:", length(unique_party_names), "\n")
+```
+
+```{r}
+#| include: false
+# Define a custom named color vector for parties
+party_colors <- c(
+  "Brighton & Hove Independents" = "#DCDCDC",
+  "Conservative and Unionist" = "#0087DC",
+  "Green Party (E&W)" = "#02A95B",
+  "Independent / Other" = "grey60",
+  "Labour Party" = "#E4003B",
+  "Liberal Democrats" = "#FAA61A",
+  "Local Alliance" = "darkorange3",
+  "Reform UK" = "#12B6CF", 
+  "Rother Assc Ind Cllrs" = "peru",
+  "Vacant" = "grey95"
+)
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
+# Make sure you have the 'leaflet' and 'htmltools' packages loaded
+library(leaflet)
+library(htmltools) # For custom controls and popups
+
+
+# Crucial: Create a color palette function for Leaflet
+# It maps the factor levels (party names) to the specified colors.
+party_palette <- colorFactor(
+  palette = unname(party_colors), # Use the colors from your named vector
+  domain = names(party_colors)    # Use the names (party names) as the domain
+)
+
+# Filter data for party_name_2 and party_name_3 (only where not NA)
+party_name_2_data <- wards_with_cllrs_reprojected %>% filter(!is.na(party_name_2))
+party_name_3_data <- wards_with_cllrs_reprojected %>% filter(!is.na(party_name_3)) # New filter for party_name_3
+
+# --- Leaflet Code with all three party layers ---
+
+# Start the Leaflet map and add the base map and primary layer
+leaflet_map <- leaflet(wards_with_cllrs_reprojected) %>%
+  addProviderTiles(providers$CartoDB.Positron, group = "Plain Map") %>%
+
+  # Add the polygon layer for party_name_1 (Primary Layer)
+  addPolygons(
+    fillColor = ~party_palette(party_name_1),
+    fillOpacity = 0.3,
+    color = "black", # Border color
+    weight = 0.5,    # Border width
+    popup = ~paste0(
+      "<b>Council:</b> ", LAD25NM, "<br>",
+      "<b>Ward:</b> ", WD25NM, "<br>",
+      "<b>Councillor 1 Party:</b> ", party_name_1, "<br>",
+      "<b>Councillor 1:</b> ", councillor_name_1, "<br>",
+      "<b>Councillor 2 Party:</b> ", party_name_2, "<br>",
+      "<b>Councillor 2:</b> ", councillor_name_2, "<br>",
+      "<b>Councillor 3 Party:</b> ", party_name_3, "<br>",
+      "<b>Councillor 3:</b> ", councillor_name_3
+    ),
+    group = "Councillor 1 Party" # Group for layer control
+  )
+
+# Conditionally add Layer 2: party_name_2
+if (nrow(party_name_2_data) > 0) {
+  leaflet_map <- leaflet_map %>%
+    addPolygons(
+      data = party_name_2_data, # Use the filtered data for this layer
+      fillColor = ~party_palette(party_name_2),
+      fillOpacity = 0.3,
+      color = "transparent", # No border for overlay
+      weight = 0,
+      popup = NULL,
+      group = "Councillor 2 Party" # Group for layer control
+    )
+} else {
+  message("No wards found with a value for 'party_name_2'. Layer skipped in Leaflet.")
+}
+
+# Conditionally add Layer 3: party_name_3 (NEW LAYER)
+if (nrow(party_name_3_data) > 0) {
+  leaflet_map <- leaflet_map %>%
+    addPolygons(
+      data = party_name_3_data, # Use the filtered data for this layer
+      fillColor = ~party_palette(party_name_3),
+      fillOpacity = 0.3,
+      color = "transparent", # No border for overlay
+      weight = 0,
+      popup = NULL,
+      group = "Councillor 3 Party" # Group for layer control
+    )
+} else {
+  message("No wards found with a value for 'party_name_3'. Layer skipped in Leaflet.")
+}
+
+
+# Continue adding the legend and layer controls to the updated leaflet_map object
+leaflet_map <- leaflet_map %>%
+  # Add the legend for the primary layer (Party 1)
+  addLegend(
+    pal = party_palette,
+    values = names(party_colors),
+    title = "Party Representation",
+    position = "bottomright"
+  ) %>%
+
+  # Add layer control to allow toggling of layers and base maps
+  addLayersControl(
+    baseGroups = c("Plain Map"), # Your plain basemap
+    overlayGroups = c("Councillor 1 Party", "Councillor 2 Party", "Councillor 3 Party"), # All three party layers as overlays
+    options = layersControlOptions(collapsed = FALSE) # Keep controls open
+  )
+
+# Print the Leaflet map
+leaflet_map
+```
+
+```{r}
+
+```
+
+Travel to Work Areas
+
+Functional Regions
+
+Current TTWA extends out to cover Ditchling and part of Shoreham
+
+Funcional Region for all Employed - updated from original Mike Coombes TTWA, here: <https://ons.maps.arcgis.com/apps/MapSeries/index.html?appid=397ccae5d5c7472e87cf0ca766386cc2>
+
+```{r}
+#| include: false
+sussex_wards_data <- st_read("data/sussex_wards_data.geojson")
+
+ward_pops <- read_csv("data/wd_2022_pop_ests.csv") %>% clean_names()
+
+wards_with_pops <- sussex_wards_data %>%
+  left_join(ward_pops, by = c("LAD25CD" = "lad_2023_code", "WD25CD" = "ward_2023_code"))
+
+
+summary_table <- wards_with_pops %>%
+  # Filter out any rows where OptionsAll or total might be missing if desired
+  # filter(!is.na(OptionsAll), !is.na(total)) %>%
+  group_by(OptionsAll) %>%
+  summarise(SumOfTotal = sum(total, na.rm = TRUE)) %>%
+  # Arrange the results (optional, but often helpful)
+  arrange(desc(SumOfTotal))
+
+```
