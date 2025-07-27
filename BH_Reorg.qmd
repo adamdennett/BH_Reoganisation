@@ -38,6 +38,11 @@ gpkg_file_path <- "data/WD_MAY_2025_UK_BFC_865555711586926236.gpkg"
 # Read the GeoJSON data into an sf object
 # st_read can directly read from a URL
 uk_bfc_data <- st_read(gpkg_file_path)
+uk_county_UA <- st_read("data/Counties_and_Unitary_Authorities_December_2024_Boundaries_UK_BFC_3685449473335087295.gpkg")
+
+sussex_boundary <- uk_county_UA %>% 
+  filter(CTYUA24CD %in% c("E10000032", "E10000011", "E06000043")) %>% 
+  st_transform(4326)
 
 Sussex_Local_Authorities = c(
     "Brighton and Hove","Eastbourne", "Hastings", "Lewes", "Rother", "Wealden", "East Sussex (County)", "Adur", "Arun", "Chichester", "Crawley", "Horsham", "Mid Sussex", "Worthing", "West Sussex (County)" 
@@ -56,34 +61,6 @@ sussex_wards_data <- uk_bfc_data %>%
 # You can now work with 'brighton_hove_data' for further analysis or plotting.
 # For example, to plot it:
 # plot(st_geometry(brighton_hove_data))
-```
-
-```{r}
-#| echo: false
-#| message: false
-#| warning: false
-library(tmap)
-
-# Create the interactive map
-# We'll color the polygons randomly or by a variable, and add popups for detail on click.
-# Assuming 'LAD17NM' still contains the human-readable name, and 'LAD25CD' is the code.
-# You can adjust 'col' to color by a specific variable if desired, e.g., col = "LAD17NM"
-tmap_mode("view") # Set tmap to interactive mode
-m <- tm_shape(sussex_wards_data) +
-  tm_polygons(
-    col = "LAD25NM",        # Color by Local Authority Name
-    alpha = 0.4,           # Transparency
-    border.col = "black",  # Border color
-    popup.vars = c(
-      "Local Authority Name" = "LAD25NM", # Display human-readable name on hover/click
-      "ONS Code" = "LAD25CD"             # Display ONS code
-    ),
-    id = "LAD25NM" # Use the name for identification in the popup
-  )  # Add base maps
-
-# Print the map
-m
-
 ```
 
 ```{r}
@@ -190,6 +167,87 @@ party_colors <- c(
 ```
 
 ```{r}
+#| include: false
+sussex_wards_data <- st_read("data/sussex_wards_data.geojson")
+
+ward_pops <- read_csv("data/wd_2022_pop_ests.csv") %>% clean_names()
+
+wards_with_pops <- sussex_wards_data %>%
+  left_join(ward_pops, by = c("LAD25CD" = "lad_2023_code", "WD25CD" = "ward_2023_code"))
+
+
+
+```
+
+```{r}
+#| eval: TRUE
+#| echo: false
+#| message: false
+#| warning: false
+#| include: false
+
+library(nomisr)
+
+c <- nomis_get_metadata(id = "NM_2014_1", concept = "geography")
+
+# pop_data <- nomis_get_data(
+#   id = "NM_2014_1",
+#   time = "2022",
+#   geography = "TYPE150",     # Wards
+#   sex = 0,                   # Total (no gender breakdown)
+#   c_age = 200,               # All ages
+#   measures = 20100,          # Value only
+#   tidy = TRUE,               # Clean snake_case format
+#   exclude_missing = TRUE     # Skip nulls, useful if some wards are missing obs
+# )
+
+#write_csv(pop_data, "data/oa_pop_ests_2022.csv")
+pop_data <- read_csv("data/oa_pop_ests_2022.csv")
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+library(leaflet)
+
+# Define the color palette function
+pal <- colorFactor("Set2", domain = sussex_wards_data$LAD25NM)
+
+map1 <- leaflet(data = sussex_wards_data) %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  addPolygons(
+    fillColor = ~pal(LAD25NM),
+    fillOpacity = 0.4,
+    color = "black",
+    weight = 0.5,
+    popup = ~paste0(
+      "<strong>Local Authority Name: </strong>", LAD25NM, "<br/>",
+      "<strong>ONS Code: </strong>", LAD25CD
+    ),
+    label = ~LAD25NM
+  ) %>%
+  # Sussex boundary overlay
+  addPolygons(
+    data = sussex_boundary,
+    fill = FALSE,
+    color = "black",
+    weight = 2,
+    group = "Sussex Boundary"
+  ) %>%
+  # Add legend
+  addLegend(
+    position = "bottomright",
+    pal = pal,
+    values = ~LAD25NM,
+    title = "Local Authority",
+    opacity = 0.7
+  )
+
+map1
+```
+
+```{r}
 #| echo: false
 #| message: false
 #| warning: false
@@ -215,7 +273,6 @@ party_name_3_data <- wards_with_cllrs_reprojected %>% filter(!is.na(party_name_3
 # Start the Leaflet map and add the base map and primary layer
 leaflet_map <- leaflet(wards_with_cllrs_reprojected) %>%
   addProviderTiles(providers$CartoDB.Positron, group = "Plain Map") %>%
-
   # Add the polygon layer for party_name_1 (Primary Layer)
   addPolygons(
     fillColor = ~party_palette(party_name_1),
@@ -244,7 +301,16 @@ if (nrow(party_name_2_data) > 0) {
       fillOpacity = 0.3,
       color = "transparent", # No border for overlay
       weight = 0,
-      popup = NULL,
+      popup = ~paste0(
+      "<b>Council:</b> ", LAD25NM, "<br>",
+      "<b>Ward:</b> ", WD25NM, "<br>",
+      "<b>Councillor 1 Party:</b> ", party_name_1, "<br>",
+      "<b>Councillor 1:</b> ", councillor_name_1, "<br>",
+      "<b>Councillor 2 Party:</b> ", party_name_2, "<br>",
+      "<b>Councillor 2:</b> ", councillor_name_2, "<br>",
+      "<b>Councillor 3 Party:</b> ", party_name_3, "<br>",
+      "<b>Councillor 3:</b> ", councillor_name_3
+    ),
       group = "Councillor 2 Party" # Group for layer control
     )
 } else {
@@ -260,7 +326,16 @@ if (nrow(party_name_3_data) > 0) {
       fillOpacity = 0.3,
       color = "transparent", # No border for overlay
       weight = 0,
-      popup = NULL,
+      popup = ~paste0(
+      "<b>Council:</b> ", LAD25NM, "<br>",
+      "<b>Ward:</b> ", WD25NM, "<br>",
+      "<b>Councillor 1 Party:</b> ", party_name_1, "<br>",
+      "<b>Councillor 1:</b> ", councillor_name_1, "<br>",
+      "<b>Councillor 2 Party:</b> ", party_name_2, "<br>",
+      "<b>Councillor 2:</b> ", councillor_name_2, "<br>",
+      "<b>Councillor 3 Party:</b> ", party_name_3, "<br>",
+      "<b>Councillor 3:</b> ", councillor_name_3
+    ),
       group = "Councillor 3 Party" # Group for layer control
     )
 } else {
@@ -289,9 +364,6 @@ leaflet_map <- leaflet_map %>%
 leaflet_map
 ```
 
-```{r}
-
-```
 
 Travel to Work Areas
 
@@ -302,21 +374,242 @@ Current TTWA extends out to cover Ditchling and part of Shoreham
 Funcional Region for all Employed - updated from original Mike Coombes TTWA, here: <https://ons.maps.arcgis.com/apps/MapSeries/index.html?appid=397ccae5d5c7472e87cf0ca766386cc2>
 
 ```{r}
-#| include: false
-sussex_wards_data <- st_read("data/sussex_wards_data.geojson")
+#| echo: false
+#| message: false
+#| warning: false
+oa_centroids <- st_read("data/Output_Areas_2021_PWC_V3_5187587502528298152.gpkg") %>% st_transform(4326)
 
-ward_pops <- read_csv("data/wd_2022_pop_ests.csv") %>% clean_names()
+oa_centroid_pop <- oa_centroids %>%
+  left_join(pop_data, by = c("OA21CD" = "geography_code"))
 
-wards_with_pops <- sussex_wards_data %>%
-  left_join(ward_pops, by = c("LAD25CD" = "lad_2023_code", "WD25CD" = "ward_2023_code"))
+oa_lut <- read_csv("data/Output_Area_(2021)_to_Ward_(2025)_to_LAD_(May_2025)_Best_Fit_Lookup_in_EW_v2.csv")
+
+oa_centroid_pop <- oa_centroid_pop %>%
+  left_join(oa_lut, by = c("OA21CD" = "OA21CD"))
+
+sussex_oa_pop <- oa_centroid_pop %>% 
+  filter(LAD25CD %in% Sussex_ONS_Codes)
 
 
-summary_table <- wards_with_pops %>%
-  # Filter out any rows where OptionsAll or total might be missing if desired
-  # filter(!is.na(OptionsAll), !is.na(total)) %>%
-  group_by(OptionsAll) %>%
-  summarise(SumOfTotal = sum(total, na.rm = TRUE)) %>%
-  # Arrange the results (optional, but often helpful)
-  arrange(desc(SumOfTotal))
 
 ```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
+library(leaflet)
+library(dplyr)
+library(viridis)
+
+
+# Create a filtered copy
+sussex_oa_pop_filtered <- sussex_oa_pop %>%
+  filter(OA21CD != "E00184795")
+
+# Enhance circle sizing for visual contrast
+sussex_oa_pop_filtered <- sussex_oa_pop_filtered %>%
+  mutate(size = sqrt(obs_value) / 3.5)  # more dramatic scaling
+
+# Reverse the RdYlBu palette
+# Viridis colour palette
+pal <- colorNumeric(palette = turbo(256), domain = sussex_oa_pop_filtered$obs_value)
+
+# Build the leaflet map
+leaflet(sussex_oa_pop_filtered) %>%
+  addProviderTiles(providers$CartoDB.Positron, group = "Plain Map") %>%
+  addCircleMarkers(
+    radius = ~size,
+    stroke = FALSE,
+    fillOpacity = 0.2,
+    color = ~pal(obs_value),
+    label = ~paste0("OA: ", OA21CD, "<br>Pop: ", obs_value)
+  ) %>%
+  addLegend(
+    position = "bottomright",
+    title = "Population (obs_value)",
+    pal = pal,
+    values = ~obs_value,
+    opacity = 0.8
+  )
+```
+
+Get some Ward-level up to date population estimates from here:
+
+https://www.ons.gov.uk/peoplepopulationandcommunity/populationandmigration/populationestimates/datasets/wardlevelmidyearpopulationestimatesexperimental
+
+
+
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
+library(leaflet)
+library(viridisLite)
+
+# Create a colour palette based on total population
+pal <- colorNumeric(palette = inferno(256), domain = wards_with_pops$total)
+
+# Build the leaflet map
+leaflet(wards_with_pops) %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addPolygons(
+    fillColor = ~pal(total),
+    weight = 1,
+    opacity = 1,
+    color = "white",
+    dashArray = "3",
+    fillOpacity = 0.7,
+    label = ~paste0(ward_2023_name, ": ", total, " people"),
+    highlightOptions = highlightOptions(
+      weight = 3,
+      color = "#666",
+      dashArray = "",
+      fillOpacity = 0.9,
+      bringToFront = TRUE
+    )
+  ) %>%
+  addLegend(
+    position = "bottomright",
+    pal = pal,
+    values = ~total,
+    title = "Population (total)",
+    opacity = 0.7
+  )
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+library(dplyr)
+library(knitr)
+wards_no_geom <- wards_with_pops %>% 
+  st_drop_geometry()
+
+library(DT)
+
+summary_table <- wards_no_geom %>%
+  group_by(OptionsAll) %>%
+  summarise(SumOfTotal = sum(total, na.rm = TRUE)) %>%
+  arrange(desc(SumOfTotal))
+
+datatable(summary_table,
+          options = list(pageLength = 10, autoWidth = TRUE),
+          class = "compact stripe hover",
+          rownames = FALSE)
+```
+
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+library(sf)
+library(dplyr)
+
+# Ensure both objects are in the same CRS
+wards_with_pops <- st_transform(wards_with_pops, st_crs(sussex_boundary))
+
+# Spatial join: attach county info to each ward
+wards_with_county <- st_join(wards_with_pops, sussex_boundary[, c("CTYUA24CD", "CTYUA24NM")])
+
+county_pops <- wards_with_county %>%
+  st_drop_geometry() %>%
+  group_by(CTYUA24CD, CTYUA24NM) %>%
+  summarise(total_population = sum(total, na.rm = TRUE))
+
+sussex_boundary_with_pops <- sussex_boundary %>%
+  left_join(county_pops, by = c("CTYUA24CD", "CTYUA24NM"))
+
+county_centroids <- st_centroid(sussex_boundary_with_pops)
+
+
+
+leaflet(data = sussex_boundary_with_pops) %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addPolygons(
+    fillColor = ~colorNumeric("YlGnBu", total_population)(total_population),
+    color = "grey30",
+    weight = 1,
+    fillOpacity = 0.7,
+    label = ~paste0(CTYUA24NM, ": ", format(total_population, big.mark = ","))
+  ) %>%
+  addLabelOnlyMarkers(
+    data = county_centroids,
+    label = ~format(total_population, big.mark = ","),
+    labelOptions = labelOptions(noHide = TRUE, direction = "center", textOnly = TRUE,
+                                style = list("color" = "black", "font-weight" = "bold",
+                                             "font-size" = "14px"))
+  )
+```
+
+
+```{r}
+options_map <- wards_with_pops %>% 
+  select(c(WD25CD, WD25NM, LAD25CD, LAD25NM, OptionsAll, total, BH, OptionA, OptionB, OptionC, OptionD, Newhaven, BigMetro))
+
+str(options_map)
+```
+
+```{r}
+library(sf)
+library(dplyr)
+
+# Group, sum population, and dissolve geometries
+options_dissolved <- wards_with_pops %>%
+  group_by(OptionsAll) %>%
+  summarise(
+    total = sum(total, na.rm = TRUE),
+    geometry = st_union(geometry),
+    .groups = "drop"
+  )
+```
+
+```{r}
+library(leaflet)
+library(dplyr)
+
+# Optional: Create color palette (one color per group)
+pal <- colorFactor("Set2", domain = options_dissolved$OptionsAll)
+
+# Create map object and add each group manually
+map <- leaflet() %>%
+  addProviderTiles(providers$CartoDB.Positron, group = "Base Map")
+
+# Loop through each OptionsAll value and add layer
+for (option in unique(options_dissolved$OptionsAll)) {
+  map <- map %>%
+    addPolygons(
+      data = options_dissolved %>% filter(OptionsAll == option),
+      fillColor = ~pal(OptionsAll),
+      color = "white",
+      weight = 1,
+      fillOpacity = 0.7,
+      group = option,
+      label = ~paste0(OptionsAll, ": ", format(total, big.mark = ","))
+    )
+} 
+
+
+# Add layer control
+map <- map %>%
+  addLayersControl(
+    overlayGroups = unique(options_dissolved$OptionsAll),
+    options = layersControlOptions(collapsed = FALSE)
+  ) %>% 
+  addPolygons(
+    data = sussex_boundary,
+    fill = FALSE,
+    color = "black",
+    weight = 2,
+    group = "Sussex Boundary"
+  )
+
+
+map
+```
+
