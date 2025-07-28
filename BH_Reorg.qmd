@@ -168,7 +168,8 @@ party_colors <- c(
 
 ```{r}
 #| include: false
-sussex_wards_data <- st_read("data/sussex_wards_data.geojson")
+#sussex_wards_data <- st_read("data/sussex_wards_data.geojson")
+sussex_wards_data <- st_read("data/sussex_wards_with_councillors.geojson")
 
 ward_pops <- read_csv("data/wd_2022_pop_ests.csv") %>% clean_names()
 
@@ -481,27 +482,6 @@ leaflet(wards_with_pops) %>%
   )
 ```
 
-```{r}
-#| echo: false
-#| message: false
-#| warning: false
-library(dplyr)
-library(knitr)
-wards_no_geom <- wards_with_pops %>% 
-  st_drop_geometry()
-
-library(DT)
-
-summary_table <- wards_no_geom %>%
-  group_by(OptionsAll) %>%
-  summarise(SumOfTotal = sum(total, na.rm = TRUE)) %>%
-  arrange(desc(SumOfTotal))
-
-datatable(summary_table,
-          options = list(pageLength = 10, autoWidth = TRUE),
-          class = "compact stripe hover",
-          rownames = FALSE)
-```
 
 
 ```{r}
@@ -549,6 +529,10 @@ leaflet(data = sussex_boundary_with_pops) %>%
 
 
 ```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
 options_map <- wards_with_pops %>% 
   select(c(WD25CD, WD25NM, LAD25CD, LAD25NM, OptionsAll, total, BH, OptionA, OptionB, OptionC, OptionD, Newhaven, BigMetro))
 
@@ -556,6 +540,10 @@ str(options_map)
 ```
 
 ```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
 library(sf)
 library(dplyr)
 
@@ -570,6 +558,9 @@ options_dissolved <- wards_with_pops %>%
 ```
 
 ```{r}
+#| echo: false
+#| message: false
+#| warning: false
 library(leaflet)
 library(dplyr)
 
@@ -613,3 +604,30 @@ map <- map %>%
 map
 ```
 
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+library(dplyr)
+library(knitr)
+wards_no_geom <- wards_with_pops %>% 
+  st_drop_geometry()
+
+library(DT)
+
+summary_table <- wards_no_geom %>%
+  mutate(OptionsAll = recode(OptionsAll,
+                             "BHWB" = "Brighton & Hove, Worthing and Burgess Hill",
+                             "HCE"  = "Horsham, Crawley and Mid Sussex",
+                             "ELW"  = "Eastbourne, Lewes and Wealden",
+                             "HBR"  = "Hastings, Bexhill and Rother", 
+                             "CH" = "Chichester, Bognor and Littlehampton ")) %>%
+  group_by(OptionsAll) %>%
+  summarise(SumOfTotal = sum(total, na.rm = TRUE)) %>%
+  arrange(desc(SumOfTotal))
+
+datatable(summary_table,
+          options = list(pageLength = 10, autoWidth = TRUE),
+          class = "compact stripe hover",
+          rownames = FALSE)
+```
