@@ -1,2 +1,4 @@
 /data
 .Rproj.user
+# Claude Code worktrees (never track these)
+.claude/
